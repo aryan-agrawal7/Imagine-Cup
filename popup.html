@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TimingOS</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TimingOS</h1>
+        </header>
+
+        <div class="controls">
+            <button id="toggleSelectionBtn" class="btn-secondary">Toggle Selection Mode</button>
+        </div>
+
+        <div class="section">
+            <h3>Selected Messages</h3>
+            <div id="messageList" class="message-list">
+                <!-- Messages will be injected here -->
+                <div class="empty-state">No messages selected yet.</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>Configuration</h3>
+            <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key" class="api-input">
+            <div class="api-controls">
+                <button id="checkModelsBtn" class="btn-secondary small">Check Connection & Models</button>
+            </div>
+            <div class="api-help">Get key from <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></div>
+        </div>
+
+        <div class="section">
+            <h3>Context / Debate Notes</h3>
+            <textarea id="contextInput" placeholder="E.g., I ignored him for 5 hours, should I reply?"></textarea>
+        </div>
+
+        <div class="actions">
+            <button id="analyzeBtn" class="btn-primary">ANALYZE TIMING</button>
+        </div>
+
+        <div id="loadingIndicator" class="hidden">
+            <div class="spinner"></div>
+            <p>Consulting the Strategist...</p>
+        </div>
+
+        <div id="resultContainer" class="result-container hidden">
+            <div class="traffic-light">
+                <div id="lightRed" class="light red"></div>
+                <div id="lightYellow" class="light yellow"></div>
+                <div id="lightGreen" class="light green"></div>
+            </div>
+            <h2 id="resultHeadline" class="result-headline"></h2>
+            
+            <div class="analysis-grid">
+                <div class="stat-box">
+                    <span class="label">Silence</span>
+                    <span id="statSilence" class="value">--</span>
+                </div>
+                <div class="stat-box">
+                    <span class="label">Power</span>
+                    <span id="statPower" class="value">--</span>
+                </div>
+            </div>
+
+            <div class="analysis-text">
+                <h4>Analysis</h4>
+                <p id="resultReasoning"></p>
+            </div>
+
+            <div class="recommendation-box">
+                <h4>Recommendation</h4>
+                <p id="resultRecommendation"></p>
+            </div>
+        </div>
+
+        <div id="chatSection" class="section hidden">
+            <h3>Strategist Chat</h3>
+            <div id="chatHistory" class="chat-history"></div>
+            <div class="chat-input-area">
+                <input type="text" id="chatInput" placeholder="Ask a follow-up...">
+                <button id="sendChatBtn">Send</button>
+            </div>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
