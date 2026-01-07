@@ -4,7 +4,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const contextInput = document.getElementById('contextInput');
     const analyzeBtn = document.getElementById('analyzeBtn');
     const resultContainer = document.getElementById('resultContainer');
-    const apiKeyInput = document.getElementById('apiKeyInput');
+    
+    // Inputs removed, using env.js CONFIG instead
+    
     const loadingIndicator = document.getElementById('loadingIndicator');
     
     // Result Elements
@@ -19,7 +21,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatHistoryDiv = document.getElementById('chatHistory');
     const chatInput = document.getElementById('chatInput');
     const sendChatBtn = document.getElementById('sendChatBtn');
-    const checkModelsBtn = document.getElementById('checkModelsBtn');
+
+
+    const themeToggle = document.getElementById('themeToggle');
+
+    function systemTheme() {
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+    }
+
+    function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    if (themeToggle) {
+        themeToggle.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`);
+    }
+    }
+
+    function initTheme() {
+    chrome.storage.local.get(['theme'], (result) => {
+        const theme = result.theme || systemTheme();
+        applyTheme(theme);
+    });
+    }
+
+    // Init early
+    initTheme();
+
+    // Toggle click
+    if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+        const current = document.documentElement.dataset.theme || systemTheme();
+        const next = current === 'dark' ? 'light' : 'dark';
+        chrome.storage.local.set({ theme: next });
+        applyTheme(next);
+    });
+    }
+
 
     const lights = {
         red: document.getElementById('lightRed'),
@@ -27,84 +65,21 @@ document.addEventListener('DOMContentLoaded', () => {
         green: document.getElementById('lightGreen')
     };
 
-    let chatHistory = []; // Stores {role: 'user'|'model', parts: [{text: ...}]}
-    let activeModel = 'gemini-2.5-flash-lite'; // Default fallback
+    let chatHistory = []; 
 
     // Initialize UI state
     loadMessages();
     checkSelectionMode();
-    loadApiKey();
 
     // Listen for storage changes
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace === 'local') {
             if (changes.messages) renderMessages(changes.messages.newValue);
             if (changes.selectionMode) updateToggleButton(changes.selectionMode.newValue);
-            if (changes.activeModel) activeModel = changes.activeModel.newValue;
         }
     });
 
-    // Save API Key on change
-    apiKeyInput.addEventListener('change', () => {
-        chrome.storage.local.set({ geminiApiKey: apiKeyInput.value.trim() });
-    });
-
-    // Check Models Button
-    checkModelsBtn.addEventListener('click', async () => {
-        const apiKey = apiKeyInput.value.trim();
-        if (!apiKey) {
-            alert('Please enter an API Key first.');
-            return;
-        }
-        
-        checkModelsBtn.textContent = 'Checking...';
-        checkModelsBtn.disabled = true;
-
-        try {
-            const models = await listAvailableModels(apiKey);
-            console.log('Available Models:', models);
-            
-            // Find the best model that supports generateContent
-            const contentModels = models.filter(m => 
-                m.supportedGenerationMethods && 
-                m.supportedGenerationMethods.includes('generateContent')
-            );
-
-            if (contentModels.length > 0) {
-                // Prioritize "Lite" and "Flash" models for better free tier quotas
-                const preferredOrder = [
-                    'gemini-2.5-flash-lite',
-                ];
-                let selectedModel = contentModels[0].name.replace('models/', '');
-
-                for (const pref of preferredOrder) {
-                    const found = contentModels.find(m => m.name.includes(pref));
-                    if (found) {
-                        selectedModel = found.name.replace('models/', '');
-                        break;
-                    }
-                }
-
-                chrome.storage.local.set({ activeModel: selectedModel });
-                activeModel = selectedModel;
-                alert(`Success! Connected. Using model: ${selectedModel}\n\nAvailable: ${contentModels.map(m => m.name).join(', ')}`);
-            } else {
-                alert('Connected, but no models support "generateContent".\n\nAvailable: ' + models.map(m => m.name).join(', '));
-            }
-        } catch (e) {
-            alert('Connection Failed: ' + e.message);
-        } finally {
-            checkModelsBtn.textContent = 'Check Connection & Models';
-            checkModelsBtn.disabled = false;
-        }
-    });
-
-    function loadApiKey() {
-        chrome.storage.local.get(['geminiApiKey', 'activeModel'], (result) => {
-            if (result.geminiApiKey) apiKeyInput.value = result.geminiApiKey;
-            if (result.activeModel) activeModel = result.activeModel;
-        });
-    }
+    // Azure Settings are now static in env.js
 
     // Toggle Selection Mode
     toggleBtn.addEventListener('click', () => {
@@ -116,10 +91,120 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Analyze Button
+    // -----------------------------
+    // PRIVACY LAYER
+    
+    function normalizeEndpoint(endpoint) {
+    return endpoint.replace(/\/+$/, '');
+    }
+
+    function findTimeSpans(text) {
+    // 24h "14:30", 12h "2:30pm", "2 pm"
+    const patterns = [
+        /\b([01]?\d|2[0-3]):[0-5]\d(\s?(a\.?m\.?|p\.?m\.?))?\b/gi,
+        /\b(1[0-2]|[1-9])\s?(a\.?m\.?|p\.?m\.?)\b/gi
+    ];
+    const spans = [];
+    for (const re of patterns) {
+        let m;
+        while ((m = re.exec(text)) !== null) {
+        spans.push({ start: m.index, end: m.index + m[0].length, replacement: "[Time]" });
+        }
+    }
+    return spans;
+    }
+
+    function applySpans(text, spans) {
+    if (!spans || spans.length === 0) return text;
+    // Replace from end → start so indexes don’t shift
+    const sorted = spans
+        .filter(s => Number.isInteger(s.start) && Number.isInteger(s.end) && s.start >= 0 && s.end > s.start && s.end <= text.length)
+        .sort((a, b) => b.start - a.start);
+
+    let out = text;
+    for (const s of sorted) {
+        out = out.slice(0, s.start) + s.replacement + out.slice(s.end);
+    }
+    return out;
+    }
+
+    function entityToSpan(entity) {
+    // Azure returns: { offset, length, category, ... }
+    const cat = entity.category || "PII";
+    const label = cat.replace(/([a-z])([A-Z])/g, '$1 $2'); // PhoneNumber -> Phone Number
+    return {
+        start: entity.offset,
+        end: entity.offset + entity.length,
+        replacement: `[${label}]`,
+        category: cat
+    };
+    }
+
+    async function callAzurePiiRedaction(endpoint, apiKey, texts) {
+    if (!endpoint || !apiKey) return { results: { documents: texts.map((t, i) => ({ id: String(i+1), entities: [] })) } };
+    
+    const url = `${normalizeEndpoint(endpoint)}/language/:analyze-text?api-version=2024-11-01`;
+
+    const documents = texts.map((t, i) => ({
+        id: String(i + 1),
+        language: "en",
+        text: t
+    }));
+
+    const body = {
+        kind: "PiiEntityRecognition",
+        analysisInput: { documents },
+        parameters: { modelVersion: "latest" }
+    };
+
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+        "Content-Type": "application/json",
+        "Ocp-Apim-Subscription-Key": apiKey
+        },
+        body: JSON.stringify(body)
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+        const msg = data?.error?.message || JSON.stringify(data) || resp.statusText;
+        throw new Error(`Azure PII Error ${resp.status}: ${msg}`);
+    }
+    return data;
+    }
+
+    async function redactMessagesWithAzurePII(messages, endpoint, apiKey) {
+    const texts = messages.map(m => m.text || "");
+    const pii = await callAzurePiiRedaction(endpoint, apiKey, texts);
+
+    const docs = pii?.results?.documents || [];
+    const summary = {};
+
+    const redactedMessages = messages.map((m, idx) => {
+        const d = docs[idx] || {};
+        const entities = Array.isArray(d.entities) ? d.entities : [];
+
+        const entitySpans = entities.map(entityToSpan);
+        for (const s of entitySpans) summary[s.category] = (summary[s.category] || 0) + 1;
+
+        const timeSpans = findTimeSpans(m.text || "");
+        const redactedText = applySpans(m.text || "", [...entitySpans, ...timeSpans]);
+
+        return { ...m, text: redactedText };
+    });
+
+    return { redactedMessages, piiSummary: summary };
+    }
+
     analyzeBtn.addEventListener('click', async () => {
-        const apiKey = apiKeyInput.value.trim();
-        if (!apiKey) {
-            alert('Please enter a valid Gemini API Key.');
+        // Use Global CONFIG from env.js
+        const endpoint = CONFIG.AZURE_OPENAI_ENDPOINT;
+        const deployment = CONFIG.AZURE_OPENAI_DEPLOYMENT;
+        const key = CONFIG.AZURE_OPENAI_KEY;
+
+        if (!endpoint || !deployment || !key) {
+            alert('Missing Azure OpenAI settings. Please check env.js');
             return;
         }
 
@@ -151,8 +236,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const prompt = constructInitialPrompt(context, payload);
 
             try {
-                const response = await callGemini(apiKey, prompt);
-                const jsonResponse = parseGeminiResponse(response);
+                const response = await callAzureOpenAI(endpoint, deployment, key, prompt);
+                const jsonResponse = parseAzureOpenAIResponse(response);
                 
                 if (jsonResponse) {
                     displayResult(jsonResponse);
@@ -183,7 +268,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const text = chatInput.value.trim();
         if (!text) return;
 
-        const apiKey = apiKeyInput.value.trim();
+        const endpoint = CONFIG.AZURE_OPENAI_ENDPOINT;
+        const deployment = CONFIG.AZURE_OPENAI_DEPLOYMENT;
+        const key = CONFIG.AZURE_OPENAI_KEY;
+
+        if (!endpoint || !deployment || !key) {
+            alert('Missing Azure OpenAI settings. Please check env.js');
+            return;
+        }
+
         appendChatMessage('user', text);
         chatInput.value = '';
         
@@ -194,12 +287,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Show temporary loading state in chat?
             const loadingMsg = appendChatMessage('ai', 'Thinking...');
             
-            const response = await callGeminiChat(apiKey, chatHistory);
+            const response = await callAzureOpenAIChat(endpoint, deployment, key, chatHistory);
             
             // Remove loading message
             loadingMsg.remove();
             
-            const aiText = response.candidates[0].content.parts[0].text;
+            const aiText = response.choices[0].message.content;
             appendChatMessage('ai', aiText);
             
             // Add AI response to history
@@ -269,66 +362,54 @@ ${JSON.stringify(payload, null, 2)}
 `;
     }
 
-    async function listAvailableModels(apiKey) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-        const response = await fetch(url);
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API Error ${response.status}: ${errorText}`);
-        }
-        const data = await response.json();
-        return data.models || [];
-    }
-
-    async function callGemini(apiKey, prompt) {
-        // Use the dynamically selected model, or fallback to gemini-2.5-flash-lite
-        const modelToUse = activeModel || 'gemini-2.5-flash-lite';
-        console.log('Calling Gemini with model:', modelToUse);
-
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${apiKey}`;
+    async function callAzureOpenAI(endpoint, deployment, key, prompt) {
+        const url = `${normalizeEndpoint(endpoint)}/openai/deployments/${deployment}/chat/completions?api-version=2024-02-15-preview`;
+        
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'api-key': key
+            },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
             })
         });
         
         if (!response.ok) {
             const errorText = await response.text();
-            if (response.status === 429) {
-                throw new Error('Quota Exceeded. Try switching to a "Flash" or "Lite" model using the Check Connection button.');
-            }
-            throw new Error(`Gemini API Error ${response.status}: ${errorText}`);
+            throw new Error(`Azure OpenAI Error ${response.status}: ${errorText}`);
         }
         return await response.json();
     }
 
-    async function callGeminiChat(apiKey, history) {
-        const modelToUse = activeModel || 'gemini-2.5-flash-lite';
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${apiKey}`;
+    async function callAzureOpenAIChat(endpoint, deployment, key, history) {
+        const url = `${normalizeEndpoint(endpoint)}/openai/deployments/${deployment}/chat/completions?api-version=2024-02-15-preview`;
+        
+        const messages = history.map(h => ({
+            role: h.role === 'model' ? 'assistant' : 'user', 
+            content: h.parts[0].text
+        }));
+
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'api-key': key },
             body: JSON.stringify({
-                contents: history
+                messages: messages
             })
         });
         
         if (!response.ok) {
             const errorText = await response.text();
-            if (response.status === 429) {
-                throw new Error('Quota Exceeded. Try switching to a "Flash" or "Lite" model using the Check Connection button.');
-            }
-            throw new Error(`Gemini API Error ${response.status}: ${errorText}`);
+            throw new Error(`Azure OpenAI Error ${response.status}: ${errorText}`);
         }
         return await response.json();
     }
 
-    function parseGeminiResponse(response) {
+    function parseAzureOpenAIResponse(response) {
         try {
-            const text = response.candidates[0].content.parts[0].text;
-            // Clean up markdown code blocks if present
+            const text = response.choices[0].message.content;
             const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
             return JSON.parse(jsonStr);
         } catch (e) {
@@ -368,16 +449,42 @@ ${JSON.stringify(payload, null, 2)}
         messages.forEach((msg, index) => {
             const item = document.createElement('div');
             item.className = 'message-item';
-            const textSpan = document.createElement('span');
+            
+            // Format time
+            const date = new Date(msg.timestamp);
+            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            // Meta info (Sender • Time)
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'message-meta';
+            const senderName = msg.sender === 'Me' ? 'You' : (msg.sender || 'Unknown');
+            metaDiv.innerHTML = `<strong>${senderName}</strong> • ${timeStr} <span class="platform-tag">${msg.platform ? msg.platform.replace('www.', '').replace('web.', '').split('.')[0] : 'web'}</span>`;
+
+            // Text content
+            const textSpan = document.createElement('div');
             textSpan.className = 'message-text';
-            textSpan.textContent = msg.text;
+            textSpan.textContent = msg.text.length > 150 ? msg.text.substring(0, 150) + '...' : msg.text;
+
             const removeBtn = document.createElement('button');
             removeBtn.className = 'remove-btn';
-            removeBtn.textContent = 'X';
+            removeBtn.textContent = '×';
             removeBtn.title = 'Remove message';
             removeBtn.onclick = () => removeMessage(index);
-            item.appendChild(textSpan);
+
+            // Structure
+            const contentDiv = document.createElement('div');
+            contentDiv.style.flex = '1';
+            contentDiv.appendChild(metaDiv);
+            contentDiv.appendChild(textSpan);
+
+            item.appendChild(contentDiv);
             item.appendChild(removeBtn);
+            
+            // Highlight if "Me"
+            if (msg.isMe) {
+                 item.style.borderLeft = '3px solid #4caf50';
+            }
+
             messageList.appendChild(item);
         });
     }
