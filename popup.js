@@ -23,41 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendChatBtn = document.getElementById('sendChatBtn');
 
 
-    const themeToggle = document.getElementById('themeToggle');
-
-    function systemTheme() {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
-    }
-
-    function applyTheme(theme) {
-    document.documentElement.dataset.theme = theme;
-    if (themeToggle) {
-        themeToggle.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`);
-    }
-    }
-
-    function initTheme() {
-    chrome.storage.local.get(['theme'], (result) => {
-        const theme = result.theme || systemTheme();
-        applyTheme(theme);
-    });
-    }
-
-    // Init early
-    initTheme();
-
-    // Toggle click
-    if (themeToggle) {
-    themeToggle.addEventListener('click', () => {
-        const current = document.documentElement.dataset.theme || systemTheme();
-        const next = current === 'dark' ? 'light' : 'dark';
-        chrome.storage.local.set({ theme: next });
-        applyTheme(next);
-    });
-    }
-
+    // Dark mode removed
+    document.documentElement.dataset.theme = 'light';
+    chrome.storage.local.remove(['theme']); 
 
     const lights = {
         red: document.getElementById('lightRed'),
@@ -74,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listen for storage changes
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace === 'local') {
-            if (changes.messages) renderMessages(changes.messages.newValue);
+            if (changes.messages) loadMessages();
             if (changes.selectionMode) updateToggleButton(changes.selectionMode.newValue);
         }
     });
@@ -99,7 +67,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function findTimeSpans(text) {
-    // 24h "14:30", 12h "2:30pm", "2 pm"
     const patterns = [
         /\b([01]?\d|2[0-3]):[0-5]\d(\s?(a\.?m\.?|p\.?m\.?))?\b/gi,
         /\b(1[0-2]|[1-9])\s?(a\.?m\.?|p\.?m\.?)\b/gi
@@ -113,6 +80,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return spans;
     }
+
+    // Redact @mentions like "@Pratham Handa" or "@john"
+    function findMentionSpans(text) {
+    const spans = [];
+    const re = /(^|\s)@\s*[\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,3}/gu;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        // if there's a leading space captured, don't replace it
+        const start = m.index + (m[1] ? m[1].length : 0);
+        spans.push({ start, end: m.index + m[0].length, replacement: "[Person]" });
+    }
+    return spans;
+    }
+
 
     function applySpans(text, spans) {
     if (!spans || spans.length === 0) return text;
@@ -189,7 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const s of entitySpans) summary[s.category] = (summary[s.category] || 0) + 1;
 
         const timeSpans = findTimeSpans(m.text || "");
-        const redactedText = applySpans(m.text || "", [...entitySpans, ...timeSpans]);
+        const mentionSpans = findMentionSpans(m.text || "");
+        const redactedText = applySpans(m.text || "", [...entitySpans, ...timeSpans, ...mentionSpans]);
 
         return { ...m, text: redactedText };
     });
@@ -435,10 +417,37 @@ ${JSON.stringify(payload, null, 2)}
 
     // --- Existing Helper Functions ---
     function loadMessages() {
-        chrome.storage.local.get(['messages'], (result) => {
-            renderMessages(result.messages || []);
-        });
+    chrome.storage.local.get(['messages'], async (result) => {
+    const messages = result.messages || [];
+
+    try {
+      const piiEndpoint = CONFIG.AZURE_LANGUAGE_ENDPOINT; // ok if undefined
+      const piiKey = CONFIG.AZURE_LANGUAGE_KEY;           // ok if undefined
+
+      const { redactedMessages } = await redactMessagesWithAzurePII(messages, piiEndpoint, piiKey);
+      renderMessages(redactedMessages);
+    } catch (e) {
+      console.warn("PII redaction failed; showing minimally redacted text", e);
+
+      // Fallback: at least redact mentions + time locally
+      const minimallyRedacted = messages.map(m => {
+        const text = m.text || "";
+        const spans = [...findTimeSpans(text), ...findMentionSpans(text)];
+        return { ...m, text: applySpans(text, spans) };
+      });
+
+      renderMessages(minimallyRedacted);
     }
+  });
+}
+
+    function redactMentionsLocal(text) {
+    return (text || "").replace(
+        /(^|\s)@\s*[\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,3}/gu,
+        "$1[Person]"
+    );
+}
+
 
     function renderMessages(messages) {
         messageList.innerHTML = '';
@@ -463,7 +472,8 @@ ${JSON.stringify(payload, null, 2)}
             // Text content
             const textSpan = document.createElement('div');
             textSpan.className = 'message-text';
-            textSpan.textContent = msg.text.length > 150 ? msg.text.substring(0, 150) + '...' : msg.text;
+            const safeText = redactMentionsLocal(msg.text);
+            textSpan.textContent = safeText.length > 150 ? safeText.substring(0, 150) + '...' : safeText;
 
             const removeBtn = document.createElement('button');
             removeBtn.className = 'remove-btn';
