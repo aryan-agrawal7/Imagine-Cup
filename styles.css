@@ -15,7 +15,7 @@
 
   /* Core colors (Light) */
   --bg: #DFBEFF; /* Saturn bg purple */
-  --bg-image: url('');
+  --bg-image: url('img/BG.png');
   
   --surface: #ffffff;
   --surface-translucent: rgba(255, 255, 255, 0.9);
@@ -53,27 +53,6 @@
   --ok: #22c55e;
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-
-  --bg: #2e1065; /* Dark purple base */
-  --bg-image: url(''); /* e.g. url('img/pattern-dark.png') */
-
-  --surface: #1e1b4b;
-  --surface-translucent: rgba(30, 27, 75, 0.9);
-
-  --border: rgba(255, 255, 255, 0.1);
-
-  --text: #f3f4f6;
-  --text-secondary: #9ca3af;
-
-  --chat-bg-user: #064e3b;
-  --chat-text-user: #ecfdf5;
-
-  --chat-bg-ai: #312e81;
-  --chat-text-ai: #e0e7ff;
-}
-
 /* Base */
 * { box-sizing: border-box; }
 
@@ -87,14 +66,15 @@ html, body {
 
 body {
   width: 100%;
-  /* Fallback color + Image */
   background-color: var(--bg);
   background-image: var(--bg-image);
-  background-repeat: repeat;
-  background-size: 300px; /* Adjust based on tile size */
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
   color: var(--text);
   overflow-y: auto;
 }
+
 
 /* Container */
 .container {
@@ -112,8 +92,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: var(--p);
-  background: var(--surface-translucent);
-  backdrop-filter: blur(8px);
+  background: #ffffff;
+  backdrop-filter: none;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -170,18 +150,11 @@ body {
   background: rgba(0,0,0,0.05);
   color: var(--text);
 }
-:root[data-theme="dark"] .icon-btn:hover {
-  background: rgba(255,255,255,0.1);
-}
 
 .icon {
   width: 20px;
   height: 20px;
 }
-
-:root[data-theme="light"] .icon-moon { display: none; }
-:root[data-theme="dark"] .icon-sun  { display: none; }
-
 
 /* Main Content / Chat */
 .section {
@@ -206,12 +179,32 @@ body {
   color: var(--text-secondary);
   letter-spacing: 0.1em;
 }
+.section-note {
+  margin: 0;
+  padding: 0 15px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.section-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 
 /* Controls */
 .controls {
   padding: 10px;
   background: transparent;
   text-align: center;
+}
+
+.actions {
+  padding: 10px;
+  text-align: center;
+}
+
+.actions .btn-primary {
+  margin-bottom: 10px;
 }
 
 /* Convert Existing Lists to look cleaner or integrated */
@@ -279,19 +272,37 @@ body {
 /* Buttons */
 .btn-primary {
   width: 100%;
-  padding: 12px;
-  background: var(--accent);
-  color: white;
-  border: none;
+  padding: 10px;
+  background: #ffffff;          /* white button */
+  color: var(--accent);          /* purple text */
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.2s;
-  box-shadow: var(--shadow-md);
+  margin-bottom: 10px;
+  transition: background 0.2s, opacity 0.2s, transform 0.12s;
+  box-shadow: var(--shadow-sm);
 }
+
 .btn-primary:hover {
-  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.92);
+  transform: translateY(-1px);
 }
+
+.btn-primary:active {
+  transform: translateY(0px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+
+.btn-primary:hover {
+  opacity: 0.92;
+}
+
 
 .btn-secondary {
   width: 100%;
@@ -304,6 +315,15 @@ body {
   margin-bottom: 10px;
   transition: background 0.2s;
 }
+
+.btn-secondary.active {
+  background: rgba(124, 58, 237, 0.14);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18);
+  font-weight: 700;
+}
+
+
 .btn-secondary:hover {
   background: rgba(0,0,0,0.05);
 }
