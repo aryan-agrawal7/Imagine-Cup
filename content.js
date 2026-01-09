@@ -228,6 +228,13 @@ function handleMouseOut(event) {
     }
 }
 
+function redactMentionsLocal(text) {
+  return (text || "").replace(
+    /(^|\s)@\s*[\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,3}/gu,
+    "$1[Person]"
+  );
+}
+
 function handleClick(event) {
     if (!isSelectionMode) return;
     
@@ -272,7 +279,7 @@ function handleClick(event) {
 
     const messageData = {
         id: Date.now().toString(),
-        text: text, // Normalized text
+        text: redactMentionsLocal(text), // Redact mention
         sender: sender,
         timestamp: timestamp,
         isMe: isMe,
